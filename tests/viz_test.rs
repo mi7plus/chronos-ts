@@ -27,7 +27,8 @@ fn test_visualization_export() {
     assert!(json_res.contains("yhat_lower"));
 
     // Verify HTML export
-    let html_res = VisualizationExporter::to_html_string(&dates, &pred, "Chronos Forecast").unwrap();
+    let html_res =
+        VisualizationExporter::to_html_string(&dates, &pred, "Chronos Forecast").unwrap();
     assert!(html_res.contains("<!DOCTYPE html>"));
     assert!(html_res.contains("Plotly.newPlot"));
 }

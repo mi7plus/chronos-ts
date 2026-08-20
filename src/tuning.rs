@@ -2,8 +2,8 @@ use chrono::NaiveDate;
 use ndarray::Array1;
 use serde::{Deserialize, Serialize};
 
-use crate::errors::{ChronosError, Result};
 use crate::decomposition::{ProphetDecomposition, SeasonalityMode};
+use crate::errors::{ChronosError, Result};
 
 /// Hyperparameter grid target parameters
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,7 +107,8 @@ impl AutoTuner {
 
         if cutoffs.is_empty() {
             return Err(ChronosError::InvalidParameters(
-                "Dataset duration is too short for the configured horizon and initial window".into(),
+                "Dataset duration is too short for the configured horizon and initial window"
+                    .into(),
             ));
         }
 
@@ -123,7 +124,9 @@ impl AutoTuner {
                 let train_vals = values.slice(ndarray::s![..*train_end_idx]).to_owned();
 
                 let val_dates = &dates[*train_end_idx..*val_end_idx];
-                let val_vals = values.slice(ndarray::s![*train_end_idx..*val_end_idx]).to_owned();
+                let val_vals = values
+                    .slice(ndarray::s![*train_end_idx..*val_end_idx])
+                    .to_owned();
 
                 // Clone base template and apply hyperparameter candidate
                 let mut tuned_model = base_model.clone();
@@ -137,7 +140,10 @@ impl AutoTuner {
                 }
 
                 // Fit fold with 4 parameters: dates, y, cap, floor
-                if tuned_model.fit(train_dates, &train_vals, None, None).is_err() {
+                if tuned_model
+                    .fit(train_dates, &train_vals, None, None)
+                    .is_err()
+                {
                     continue;
                 }
 
@@ -225,12 +231,8 @@ fn evaluate_metric(pred: &Array1<f64>, actual: &Array1<f64>, metric: Optimizatio
     }
 
     match metric {
-        OptimizationMetric::MAE => {
-            (pred - actual).mapv(|x| x.abs()).sum() / (n as f64)
-        }
-        OptimizationMetric::RMSE => {
-            ((pred - actual).mapv(|x| x * x).sum() / (n as f64)).sqrt()
-        }
+        OptimizationMetric::MAE => (pred - actual).mapv(|x| x.abs()).sum() / (n as f64),
+        OptimizationMetric::RMSE => ((pred - actual).mapv(|x| x * x).sum() / (n as f64)).sqrt(),
         OptimizationMetric::MAPE => {
             let sum_err: f64 = pred
                 .iter()

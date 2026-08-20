@@ -1,12 +1,12 @@
 use crate::errors::{ChronosError, Result};
+use crate::linalg;
 use chrono::{Datelike, NaiveDate};
 use ndarray::{s, Array1, Array2};
-use ndarray_linalg::LeastSquaresSvd;
-use serde::{Deserialize, Serialize};
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
-use std::collections::HashMap;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SeasonalitySpec {
@@ -77,7 +77,6 @@ pub enum SeasonalityMode {
     Additive,
     Multiplicative,
 }
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum TrendType {
@@ -156,31 +155,36 @@ impl ProphetDecomposition {
 
     /// Serializes the model state (including fitted coefficients) to a JSON string.
     pub fn to_json(&self) -> Result<String> {
-        serde_json::to_string_pretty(self)
-            .map_err(|e| ChronosError::InvalidParameters(format!("Failed to serialize model: {}", e)))
+        serde_json::to_string_pretty(self).map_err(|e| {
+            ChronosError::InvalidParameters(format!("Failed to serialize model: {}", e))
+        })
     }
 
     /// Deserializes a ProphetDecomposition model from a JSON string.
     pub fn from_json(json_str: &str) -> Result<Self> {
-        serde_json::from_str(json_str)
-            .map_err(|e| ChronosError::InvalidParameters(format!("Failed to deserialize model: {}", e)))
+        serde_json::from_str(json_str).map_err(|e| {
+            ChronosError::InvalidParameters(format!("Failed to deserialize model: {}", e))
+        })
     }
 
     /// Saves the model state to a JSON file on disk.
     pub fn save_to_file<P: AsRef<std::path::Path>>(&self, path: P) -> Result<()> {
         let json_data = self.to_json()?;
-        std::fs::write(path, json_data)
-            .map_err(|e| ChronosError::InvalidParameters(format!("Failed to write model file: {}", e)))
+        std::fs::write(path, json_data).map_err(|e| {
+            ChronosError::InvalidParameters(format!("Failed to write model file: {}", e))
+        })
     }
 
     /// Loads a model state from a JSON file on disk.
     pub fn load_from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self> {
-        let json_data = std::fs::read_to_string(path)
-            .map_err(|e| ChronosError::InvalidParameters(format!("Failed to read model file: {}", e)))?;
+        let json_data = std::fs::read_to_string(path).map_err(|e| {
+            ChronosError::InvalidParameters(format!("Failed to read model file: {}", e))
+        })?;
         Self::from_json(&json_data)
     }
 
     /// Computes the logistic trend g(t) handling rate delta adjustments and offset continuity
+    #[allow(clippy::too_many_arguments)]
     fn evaluate_logistic_trend(
         &self,
         t_norm: &Array1<f64>,
@@ -251,7 +255,9 @@ impl ProphetDecomposition {
     /// Normalizes dates relative to the training period's t0 and scale horizon
     fn normalize_time(&self, dates: &[NaiveDate]) -> Result<Array1<f64>> {
         let t0 = self.t0_days.ok_or_else(|| {
-            ChronosError::InvalidParameters("Model must be fit before normalizing prediction dates".into())
+            ChronosError::InvalidParameters(
+                "Model must be fit before normalizing prediction dates".into(),
+            )
         })?;
         let total = self.total_days.unwrap_or(1.0);
 
@@ -280,7 +286,8 @@ impl ProphetDecomposition {
 
     fn build_seasonal_and_holiday_matrix(&self, dates: &[NaiveDate]) -> Array2<f64> {
         let n = dates.len();
-        let total_fourier_cols: usize = self.seasonalities.iter().map(|s| s.fourier_order * 2).sum();
+        let total_fourier_cols: usize =
+            self.seasonalities.iter().map(|s| s.fourier_order * 2).sum();
         let num_holidays = self.holidays.len();
         let cols = total_fourier_cols + num_holidays;
 
@@ -289,7 +296,9 @@ impl ProphetDecomposition {
         }
 
         let mut x = Array2::<f64>::zeros((n, cols));
-        let t0 = self.t0_days.unwrap_or_else(|| dates[0].num_days_from_ce() as f64);
+        let t0 = self
+            .t0_days
+            .unwrap_or_else(|| dates[0].num_days_from_ce() as f64);
 
         let mut col_offset = 0;
 
@@ -323,7 +332,7 @@ impl ProphetDecomposition {
         x
     }
 
-/// Predicts yhat and computes percentile-based uncertainty intervals via parallel Monte Carlo simulation
+    /// Predicts yhat and computes percentile-based uncertainty intervals via parallel Monte Carlo simulation
     pub fn predict_with_intervals(
         &self,
         dates: &[NaiveDate],
@@ -339,7 +348,9 @@ impl ProphetDecomposition {
 
         // 1. Retrieve delta vector
         let delta = self.delta.as_ref().ok_or_else(|| {
-            ChronosError::InvalidParameters("Model must be fitted before predicting intervals".into())
+            ChronosError::InvalidParameters(
+                "Model must be fitted before predicting intervals".into(),
+            )
         })?;
 
         let abs_mean_delta = delta.mapv(|d| d.abs()).mean().unwrap_or(0.01);
@@ -376,7 +387,8 @@ impl ProphetDecomposition {
                             trend_draw + base_pred.seasonal[t] + base_pred.holidays[t] + noise
                         }
                         SeasonalityMode::Multiplicative => {
-                            trend_draw * (1.0 + base_pred.seasonal[t] + base_pred.holidays[t]) + noise
+                            trend_draw * (1.0 + base_pred.seasonal[t] + base_pred.holidays[t])
+                                + noise
                         }
                     };
 
@@ -407,7 +419,12 @@ impl ProphetDecomposition {
                 let mut y_col: Vec<f64> = samples.iter().map(|s| s.1[t]).collect();
                 y_col.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-                (t_col[lower_idx], t_col[upper_idx], y_col[lower_idx], y_col[upper_idx])
+                (
+                    t_col[lower_idx],
+                    t_col[upper_idx],
+                    y_col[lower_idx],
+                    y_col[upper_idx],
+                )
             })
             .collect();
 
@@ -548,10 +565,9 @@ impl ProphetDecomposition {
             xtx[[col, col]] += lambda_holiday;
         }
 
-        // Solve Ridge regression system
+        // Solve the (regularized, positive-definite) Ridge normal equations.
         let xty = x.t().dot(&y_target);
-        let solution = xtx.least_squares(&xty)?;
-        let coeffs = solution.solution;
+        let coeffs = linalg::solve(&xtx, &xty).map_err(ChronosError::LinalgError)?;
 
         self.m = Some(coeffs[0]);
         self.k = Some(coeffs[1]);
@@ -609,7 +625,9 @@ impl ProphetDecomposition {
         let mut seasonalities_map = HashMap::new();
 
         if let Some(ref beta) = self.beta {
-            let t0 = self.t0_days.unwrap_or_else(|| dates[0].num_days_from_ce() as f64);
+            let t0 = self
+                .t0_days
+                .unwrap_or_else(|| dates[0].num_days_from_ce() as f64);
             let mut col_offset = 0;
 
             // Extract each registered seasonality independently

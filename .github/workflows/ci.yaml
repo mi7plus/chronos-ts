@@ -10,6 +10,29 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  lint:
+    name: Format & Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check Formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy (default features)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Clippy (python feature)
+        run: cargo clippy --features python -- -D warnings
+
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -23,14 +46,18 @@ jobs:
 
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
       - name: Run Unit & Integration Tests
         run: cargo test --workspace --all-targets
+
+      - name: Doctests
+        run: cargo test --doc
+
+      - name: Build Python Extension
+        run: cargo build --features python
 
       - name: Check Documentation
         run: cargo doc --no-deps

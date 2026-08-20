@@ -1,6 +1,6 @@
 use chronos_ts::arima::{SarimaModel, SarimaOrder};
+use chronos_ts::decomposition::{ProphetDecomposition, SeasonalitySpec, TrendType};
 use ndarray::array;
-use chronos_ts::decomposition::{ProphetDecomposition, TrendType, SeasonalitySpec};
 
 fn create_dummy_model(exog_beta: Option<ndarray::Array1<f64>>) -> SarimaModel {
     SarimaModel {
@@ -19,6 +19,9 @@ fn create_dummy_model(exog_beta: Option<ndarray::Array1<f64>>) -> SarimaModel {
         sma_coeffs: array![],
         sigma2: 1.25,
         log_likelihood: -42.5,
+        intercept: 0.0,
+        std_errors: None,
+        transform: None,
         exog_beta,
     }
 }
@@ -79,14 +82,12 @@ fn test_serde_backwards_compatibility() {
 fn test_prophet_decomposition_serde() {
     let original = ProphetDecomposition {
         trend_type: TrendType::Linear,
-        seasonalities: vec![
-            SeasonalitySpec {
-                name: "yearly".to_string(),
-                fourier_order: 3,
-                period_days: 365.25,
-                prior_scale: 10.0,
-            }
-        ],
+        seasonalities: vec![SeasonalitySpec {
+            name: "yearly".to_string(),
+            fourier_order: 3,
+            period_days: 365.25,
+            prior_scale: 10.0,
+        }],
         ..Default::default() // Automatically fills in beta, capacities, changepoint_prior_scale, etc.
     };
 
@@ -95,7 +96,11 @@ fn test_prophet_decomposition_serde() {
     println!("Serialized JSON:\n{}", json);
 
     // Deserialize back into struct
-    let deserialized: ProphetDecomposition = serde_json::from_str(&json).expect("Failed to deserialize");
+    let deserialized: ProphetDecomposition =
+        serde_json::from_str(&json).expect("Failed to deserialize");
 
-    assert_eq!(original.seasonalities.len(), deserialized.seasonalities.len());
+    assert_eq!(
+        original.seasonalities.len(),
+        deserialized.seasonalities.len()
+    );
 }

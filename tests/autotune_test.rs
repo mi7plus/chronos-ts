@@ -1,6 +1,8 @@
 use chrono::NaiveDate;
+use chronos_ts::{
+    AutoTuner, HyperparameterGrid, OptimizationMetric, ProphetDecomposition, SeasonalityMode,
+};
 use ndarray::Array1;
-use chronos_ts::{AutoTuner, HyperparameterGrid, OptimizationMetric, ProphetDecomposition, SeasonalityMode};
 
 #[test]
 fn test_autotune_grid_search() {

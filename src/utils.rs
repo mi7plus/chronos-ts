@@ -1,11 +1,41 @@
 #![allow(non_snake_case)]
 use ndarray::{s, Array1};
 
-/// Computes the sample variance of a 1D slice.
+/// Computes the sample variance of a 1D slice. Returns 0.0 for fewer than two
+/// elements (where sample variance is undefined) instead of producing NaN/inf.
 pub fn variance(slice: &Array1<f64>) -> f64 {
+    if slice.len() < 2 {
+        return 0.0;
+    }
     let mean = slice.mean().unwrap_or(0.0);
     let count = slice.len() as f64;
     slice.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / (count - 1.0)
+}
+
+/// Applies the Box-Cox transform. `lambda == 0` is the natural log; otherwise
+/// `(x^lambda - 1) / lambda`. Requires strictly positive input.
+pub fn box_cox(data: &Array1<f64>, lambda: f64) -> Array1<f64> {
+    if lambda == 0.0 {
+        data.mapv(f64::ln)
+    } else {
+        data.mapv(|x| (x.powf(lambda) - 1.0) / lambda)
+    }
+}
+
+/// Inverts the Box-Cox transform (see [`box_cox`]).
+pub fn inv_box_cox(data: &Array1<f64>, lambda: f64) -> Array1<f64> {
+    if lambda == 0.0 {
+        data.mapv(f64::exp)
+    } else {
+        data.mapv(|y| {
+            let base = lambda * y + 1.0;
+            if base <= 0.0 {
+                0.0
+            } else {
+                base.powf(1.0 / lambda)
+            }
+        })
+    }
 }
 
 /// Computes difference of order `d` on time series data.
@@ -158,7 +188,13 @@ pub mod serde_opt_array2 {
     }
 }
 
-/// Reintegrates a differenced forecast back to original series scale.
+/// Reintegrates a differenced forecast back to the original series scale.
+///
+/// `forecast_diff` holds forecasts of the `d`-th difference of the series. Undoing
+/// one level of differencing is a cumulative sum anchored on the last value of the
+/// `(d-1)`-th difference of the observed `history`; the routine then recurses down
+/// to level 0. Anchoring on the correct per-level tail (rather than always on the
+/// last raw observation) is what makes `d > 1` integration correct.
 pub fn integrate_forecast(
     forecast_diff: &Array1<f64>,
     history: &Array1<f64>,
@@ -167,21 +203,56 @@ pub fn integrate_forecast(
     if d == 0 {
         return forecast_diff.clone();
     }
-    let mut res = Vec::with_capacity(forecast_diff.len());
-    let mut last_val = *history.last().unwrap_or(&0.0);
 
+    // Anchor = last value of the (d-1)-th difference of the observed history.
+    let hist_lower = difference(history, d - 1);
+    let anchor = *hist_lower.last().unwrap_or(&0.0);
+
+    let mut cum = anchor;
+    let mut lifted = Vec::with_capacity(forecast_diff.len());
     for &val in forecast_diff.iter() {
-        let next_val = last_val + val;
-        res.push(next_val);
-        last_val = next_val;
+        cum += val;
+        lifted.push(cum);
     }
 
-    let out = Array1::from(res);
-    if d > 1 {
-        integrate_forecast(&out, history, d - 1)
-    } else {
-        out
+    // `lifted` is now the forecast of the (d-1)-th difference; recurse.
+    integrate_forecast(&Array1::from(lifted), history, d - 1)
+}
+
+/// Reintegrates a seasonally-differenced forecast back to the pre-seasonal-diff scale.
+///
+/// `forecast_sdiff` holds forecasts of `(1 - B^m)^D z`, and `z_hist` is the observed
+/// series at the pre-seasonal-difference level (i.e. after any non-seasonal
+/// differencing). Undoing one seasonal level is `x_t = w_t + x_{t-m}`, anchored on
+/// the tail of the `(D-1)`-th seasonal difference of `z_hist`; the routine recurses
+/// down to level 0. Returns the forecast on the `z` scale.
+pub fn seasonal_integrate_forecast(
+    forecast_sdiff: &Array1<f64>,
+    z_hist: &Array1<f64>,
+    m: usize,
+    D: usize,
+) -> Array1<f64> {
+    if D == 0 || m <= 1 {
+        return forecast_sdiff.clone();
     }
+
+    // History at the (D-1)-th seasonal-difference level provides the lag-m anchors.
+    let base = seasonal_difference(z_hist, m, D - 1);
+    if base.len() < m {
+        // Not enough history to seasonally integrate; fall back to the raw forecast.
+        return forecast_sdiff.clone();
+    }
+
+    let mut extended = base.to_vec();
+    let start = extended.len();
+    for &w in forecast_sdiff.iter() {
+        let idx = extended.len();
+        let prev = extended[idx - m];
+        extended.push(w + prev);
+    }
+    let lifted = Array1::from(extended[start..].to_vec());
+
+    seasonal_integrate_forecast(&lifted, z_hist, m, D - 1)
 }
 
 pub fn seasonal_difference(data: &Array1<f64>, m: usize, D: usize) -> Array1<f64> {

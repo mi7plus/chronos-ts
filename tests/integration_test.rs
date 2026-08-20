@@ -1,5 +1,5 @@
-use chronos_ts::{auto_arima, AutoArimaOptions, ProphetDecomposition, Holiday};
 use chrono::NaiveDate;
+use chronos_ts::{auto_arima, AutoArimaOptions, Holiday, ProphetDecomposition};
 use ndarray::Array1;
 
 #[test]
@@ -14,7 +14,10 @@ fn test_constant_series() {
 
     // Should return Ok or an explicit Err without panicking
     let res = auto_arima(&series, opts);
-    assert!(res.is_ok() || res.is_err(), "Must handle constant series gracefully without panicking");
+    assert!(
+        res.is_ok() || res.is_err(),
+        "Must handle constant series gracefully without panicking"
+    );
 }
 
 #[test]
@@ -29,7 +32,10 @@ fn test_small_sample_size() {
     };
 
     let model = auto_arima(&series, opts);
-    assert!(model.is_ok(), "Model fitting should work on 8+ observations");
+    assert!(
+        model.is_ok(),
+        "Model fitting should work on 8+ observations"
+    );
 }
 
 #[test]
@@ -45,7 +51,10 @@ fn test_prophet_decomposition_edge_cases() {
     let mut decomp = ProphetDecomposition::new(2, 0.05);
     let res = decomp.fit(&dates, &series, None, None);
 
-    assert!(res.is_ok(), "Prophet decomposition should handle uniform series");
+    assert!(
+        res.is_ok(),
+        "Prophet decomposition should handle uniform series"
+    );
 }
 
 #[test]

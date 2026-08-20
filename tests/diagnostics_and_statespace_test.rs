@@ -1,8 +1,8 @@
+use chrono::NaiveDate;
 use chronos_ts::decomposition::ProphetDecomposition;
 use chronos_ts::diagnostics::ResidualDiagnostics;
 use chronos_ts::statespace::{KalmanFilter, StateSpaceModel};
 use chronos_ts::statespace_mle::fit_state_space_mle;
-use chrono::NaiveDate;
 use ndarray::Array1;
 
 #[test]
@@ -56,7 +56,9 @@ fn test_kalman_filter_and_rts_smoother() {
 #[test]
 fn test_prophet_decomposition_fit() {
     let start = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
-    let dates: Vec<NaiveDate> = (0..100).map(|i| start + chrono::Duration::days(i)).collect();
+    let dates: Vec<NaiveDate> = (0..100)
+        .map(|i| start + chrono::Duration::days(i))
+        .collect();
 
     let y_vals: Vec<f64> = (0..100)
         .map(|i| i as f64 * 0.2 + (i as f64 % 7.0))
@@ -66,7 +68,9 @@ fn test_prophet_decomposition_fit() {
     let mut prophet = ProphetDecomposition::new(5, 0.1);
     prophet.add_seasonality("weekly", 7.0, 2);
 
-    prophet.fit(&dates, &y, None, None).expect("Prophet fitting should succeed");
+    prophet
+        .fit(&dates, &y, None, None)
+        .expect("Prophet fitting should succeed");
     let pred = prophet.predict(&dates).expect("Prediction should succeed");
 
     assert_eq!(pred.yhat.len(), 100);

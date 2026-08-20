@@ -2,128 +2,185 @@
 
 [![Crates.io](https://img.shields.io/crates/v/chronos-ts.svg)](https://crates.io/crates/chronos-ts)
 [![Documentation](https://docs.rs/chronos-ts/badge.svg)](https://docs.rs/chronos-ts)
-[![License: MIT/Apache-2.0](https://img.shields.io/badge/License-MIT%2FApache--2.0-blue.svg)](LICENSE)
-[![CI](https://github.com/yourusername/chronos-ts/actions/workflows/ci.yml/badge.svg)](https://github.com/yourusername/chronos-ts/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/mi7plus/chronos-ts/actions/workflows/ci.yaml/badge.svg)](https://github.com/mi7plus/chronos-ts/actions)
 
-`chronos-ts` is a high-performance, parallelized time series analysis and probabilistic forecasting engine written in Rust with official Python bindings (`pyo3`).
+`chronos-ts` is a pure-Rust, parallelized time-series analysis and forecasting
+library with optional Python bindings (`pyo3`). It ships two complementary
+modelling engines:
 
-Engineered for production environments where speed and mathematical stability are paramount, `chronos-ts` provides automatic ARIMA model selection (`auto_arima`), confidence interval generation, dynamic workload batching, and full `serde` state persistence.
+* **Auto-ARIMA / SARIMA / SARIMAX** — automatic order selection with real
+  coefficient estimation by Conditional Sum of Squares (CSS).
+* **Prophet-style decomposition** — additive/multiplicative structural models
+  with trend changepoints, Fourier seasonalities, holidays, logistic growth and
+  Monte-Carlo uncertainty intervals.
 
----
-
-# Key Features
-
-* **Parallel Model Selection:** Threshold-based execution engine (`rayon`) evaluates large ARIMA parameter grids across CPU cores with minimal overhead for small datasets (~71% speedup on large grid searches).
-* **Probabilistic Forecasting:** Generates point forecasts along with $80\%$ ($z = 1.282$) and $95\%$ ($z = 1.960$) prediction bounds.
-* **Numerical & Statistical Safety:** Guardrails against zero-variance inputs, near-constant series, and boundary failures during Dickey-Fuller stationarity tests (`adf_test`).
-* **Zero-Copy Python Interop:** Native Python bindings powered by `pyo3` and `numpy` dynamic arrays, compliant with PEP 561 typing (`.pyi` stubs + `py.typed`).
-* **Model Serialization:** Complete `serde` support across internal state vectors for JSON/Bincode persistence.
-
----
-
-# Benchmarks
-
-Grid search evaluation times (`auto_arima` across $p \in [0, 5], q \in [0, 5], d \in [0, 2]$) on a 10,000-point synthetic series:
-
-| Engine | Execution Time | Speedup |
-| :--- | :--- | :--- |
-| **`chronos-ts` (Rust / Rayon)** | **142 ms** | **1.0x (Baseline)** |
-| `chronos-ts` (Python Binding) | **148 ms** | **1.04x** |
-| `pmdarima` (Python / C) | 2,410 ms | 16.97x slower |
-| `statsmodels` (Python) | 3,850 ms | 27.11x slower |
+It has **no LAPACK/BLAS/MKL dependency** and needs no C toolchain — all linear
+algebra is implemented in Rust, so it builds cleanly on every platform.
 
 ---
 
-# Rust Usage
+## Key Features
 
-Add `chronos-ts` and `ndarray` to your `Cargo.toml`:
+* **Real ARIMA estimation, two ways.** Coefficients are fitted by fast Conditional
+  Sum of Squares (default) or exact Gaussian **maximum likelihood** via the Kalman
+  filter (`EstimationMethod::Mle`). `auto_arima` chooses the order by AIC/AICc/BIC
+  using a stepwise (or full-grid) search, parallelized with `rayon`. A mean/drift
+  term is estimated automatically, and a stationarity guard keeps fits stable.
+* **SARIMAX.** Exogenous regressors are supported end-to-end (fit and forecast).
+* **Uncertainty everywhere.** Coefficient standard errors, 80%/95% prediction
+  intervals from the model's exact MA(∞) forecast variance, and an optional
+  Box-Cox/log transform (forecasts auto back-transformed).
+* **Diagnostics & validation.** In-sample residuals feed ACF/PACF, Ljung-Box and
+  Jarque-Bera tests; `arima_cross_validation` gives rolling-origin MAE/RMSE/MAPE.
+* **Statistical safety.** Guards against zero-variance/near-constant inputs; the
+  Augmented Dickey-Fuller test maps its statistic through the Dickey-Fuller
+  distribution (not a naive t-distribution).
+* **Serde persistence.** Full JSON serialization of fitted model state.
+* **Python bindings.** `auto_arima`, `SarimaModel` and `Prophet` exposed through
+  `pyo3`/`numpy`, PEP 561 typed (`.pyi` stubs + `py.typed`).
+
+---
+
+## Examples & Benchmarks
+
+Runnable examples live in [`examples/`](examples):
+
+```bash
+cargo run --example arima_forecast
+cargo run --example prophet_forecast
+```
+
+Criterion benchmarks (`auto_arima` across several series sizes, plus a Prophet fit):
+
+```bash
+cargo bench
+```
+
+Results are written to `target/criterion/` (HTML reports enabled). Numbers are
+hardware-dependent, so none are quoted here — measure on your own machine.
+
+---
+
+## Rust Usage
 
 ```toml
 [dependencies]
-chronos-ts = "0.1.0"
+chronos-ts = "0.1"
 ndarray = "0.15"
 serde_json = "1.0"
 ```
 
-## Auto-ARIMA & Probabilistic Forecasting
+### Auto-ARIMA & Probabilistic Forecasting
+
 ```rust
 use chronos_ts::arima::{auto_arima, AutoArimaOptions};
 use ndarray::Array1;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-// 1. Generate or load time series data
-let data = Array1::linspace(10.0, 50.0, 100);
+    // 1. Load your time series.
+    let data = Array1::linspace(10.0, 50.0, 100);
 
-    // 2. Configure auto-ARIMA parameters
-    let mut opts = AutoArimaOptions::default();
-    opts.max_p = 3;
-    opts.max_q = 3;
-    opts.m = 4; // Seasonal period
+    // 2. Configure the search.
+    let opts = AutoArimaOptions {
+        max_p: 3,
+        max_q: 3,
+        ..Default::default()
+    };
 
-    // 3. Automatically fit optimal model
+    // 3. Fit the optimal model (coefficients estimated by CSS).
     let model = auto_arima(&data, opts)?;
+    println!("Selected order: {:?}", model.order);
 
-    // 4. Generate a 10-step forecast with 80% and 95% confidence bounds
+    // 4. Forecast 10 steps with 80% and 95% bounds.
     let forecast = model.forecast_with_intervals(&data, 10);
-
-    println!("Point Forecasts: {:?}", forecast.mean);
-    println!("95% Upper Bound: {:?}", forecast.upper_95);
-    println!("95% Lower Bound: {:?}", forecast.lower_95);
+    println!("Point forecast: {:?}", forecast.mean);
+    println!("95% interval:   [{:?}, {:?}]", forecast.lower_95, forecast.upper_95);
 
     Ok(())
 }
 ```
 
-## Model Serialization
+### Prophet-style Decomposition
+
+```rust
+use chronos_ts::{ProphetDecomposition, SeasonalityMode};
+use chrono::{Duration, NaiveDate};
+use ndarray::Array1;
+
+let start = NaiveDate::from_ymd_opt(2023, 1, 1).unwrap();
+let dates: Vec<NaiveDate> = (0..90).map(|i| start + Duration::days(i)).collect();
+let y = Array1::from_shape_fn(90, |i| {
+    10.0 + 0.1 * i as f64 + 2.0 * (2.0 * std::f64::consts::PI * i as f64 / 7.0).sin()
+});
+
+let mut model = ProphetDecomposition::new(10, 0.05);
+model.seasonality_mode = SeasonalityMode::Additive;
+model.add_seasonality("weekly", 7.0, 3);
+model.fit(&dates, &y, None, None).unwrap();
+
+let prediction = model.predict(&dates).unwrap();
+println!("yhat: {:?}", prediction.yhat);
+```
+
+### Model Serialization
+
 ```rust
 use chronos_ts::arima::SarimaModel;
 
-// Serialize fitted model state to JSON
 let json_repr = serde_json::to_string(&model)?;
-
-// Deserialize model back into executable Rust struct
-let restored_model: SarimaModel = serde_json::from_str(&json_repr)?;
+let restored: SarimaModel = serde_json::from_str(&json_repr)?;
 ```
 
-# Python Usage
-##Install via pip:
-```
+---
+
+## Python Usage
+
+Install (built with [maturin](https://github.com/PyO3/maturin)):
+
+```bash
 pip install chronos-ts
 ```
 
-##Python API Example
 ```python
 import numpy as np
 import chronos_ts
 
-# Generate input array
+# --- ARIMA ---
 data = np.linspace(10.0, 50.0, 100) + np.random.normal(0, 1, 100)
+model = chronos_ts.auto_arima(data, max_p=3, max_q=3)
+print("order:", model.order)
 
-# Fit model using Rust backend
-model = chronos_ts.auto_arima(data, max_p=3, max_q=3, seasonal_period=4)
-
-# Generate forecasts with confidence intervals
 res = model.forecast_with_intervals(data, steps=10)
+print("mean:", res["mean"])
+print("95% upper:", res["upper_95"])
 
-print("Mean Forecast:", res["mean"])
-print("80% Upper Bound:", res["upper_80"])
-print("95% Upper Bound:", res["upper_95"])
-```
-##Feature Flags
-|Feature   | Description  |
-|---|---|
-| default  | Standard pure-Rust compilation target (rlib).  |
-| python  | Compiles dynamic libraries (cdylib) and enables pyo3/numpy extensions.  |
-| intel-mkl | Accelerates matrix operations using static Intel MKL linear algebra linking.  |
+# --- Prophet ---
+dates = [f"2023-{(i // 28) + 1:02d}-{(i % 28) + 1:02d}" for i in range(90)]
+y = np.array([10.0 + 0.1 * i for i in range(90)])
 
-To compile locally with Python support enabled:
-```
-cargo build --release --features python
+prophet = chronos_ts.Prophet(n_changepoints=10, changepoint_prior_scale=0.05)
+prophet.add_seasonality("weekly", 7.0, 3)
+prophet.fit(dates, y)
+pred = prophet.predict(dates)
+print("yhat:", pred["yhat"])
 ```
 
-To install directly into an active Python virtual environment:
-```
+### Feature Flags
+
+| Feature   | Description                                                              |
+| --------- | ------------------------------------------------------------------------ |
+| `default` | Pure-Rust library (`rlib`). No C toolchain or BLAS/LAPACK required.       |
+| `python`  | Builds the `cdylib` and enables the `pyo3`/`numpy` Python extension.      |
+
+Build the Python extension locally:
+
+```bash
 maturin develop --features python
 ```
 
-#License
-MIT License (LICENSE-MIT or http://opensource.org/licenses/MIT)
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).

@@ -1,7 +1,6 @@
 #![allow(non_snake_case)]
+use crate::linalg;
 use ndarray::{s, Array1, Array2};
-use ndarray_linalg::LeastSquaresSvd;
-use statrs::distribution::{ContinuousCDF, StudentsT};
 
 /// Augmented Dickey-Fuller (ADF) Test
 /// Null Hypothesis (H0): The series has a unit root (is non-stationary).
@@ -76,9 +75,9 @@ pub fn adf_test(series: &Array1<f64>, max_lags: Option<usize>) -> AdfTestResult 
         }
     }
 
-    // OLS via Singular Value Decomposition
-    let sol = match x.least_squares(&y_dep) {
-        Ok(s) => s,
+    // OLS via the normal equations (pure Rust, no LAPACK backend required).
+    let beta = match linalg::lstsq(&x, &y_dep) {
+        Ok(b) => b,
         Err(_) => {
             return AdfTestResult {
                 stat: 0.0,
@@ -87,7 +86,6 @@ pub fn adf_test(series: &Array1<f64>, max_lags: Option<usize>) -> AdfTestResult 
             };
         }
     };
-    let beta = sol.solution;
 
     // Compute standard error of gamma (beta[0])
     let residuals = &y_dep - &x.dot(&beta);
@@ -95,8 +93,8 @@ pub fn adf_test(series: &Array1<f64>, max_lags: Option<usize>) -> AdfTestResult 
     let df = effective_n - cols;
     let mse = sse / (df as f64);
 
-    let xtx_inv = match (x.t().dot(&x)).least_squares(&Array2::eye(cols)) {
-        Ok(s) => s.solution,
+    let xtx_inv = match linalg::inv(&x.t().dot(&x)) {
+        Ok(m) => m,
         Err(_) => {
             return AdfTestResult {
                 stat: 0.0,
@@ -118,24 +116,60 @@ pub fn adf_test(series: &Array1<f64>, max_lags: Option<usize>) -> AdfTestResult 
 
     let t_stat = beta[0] / se_gamma;
 
-    // Safe p-value evaluation with statrs
-    let p_value = match StudentsT::new(0.0, 1.0, df as f64) {
-        Ok(t_dist) => {
-            let p = t_dist.cdf(t_stat);
-            if p.is_nan() {
-                1.0
-            } else {
-                p.clamp(0.0, 1.0)
-            }
-        }
-        Err(_) => 1.0,
-    };
+    // The ADF statistic does NOT follow a Student-t distribution under the null;
+    // it follows the (non-standard) Dickey-Fuller distribution. Map the statistic
+    // to a p-value using tabulated DF quantiles for the constant-only case.
+    let p_value = dickey_fuller_pvalue(t_stat);
 
     AdfTestResult {
         stat: t_stat,
         p_value,
         used_lags: lags,
     }
+}
+
+/// Approximate p-value of the Augmented Dickey-Fuller statistic for the
+/// "constant, no trend" regression case.
+///
+/// The ADF `tau` statistic follows the Dickey-Fuller distribution rather than a
+/// Student-t. This uses the well-established asymptotic quantiles of that
+/// distribution (Fuller 1976 / MacKinnon) and performs monotone linear
+/// interpolation of the CDF, which is accurate around the decision region
+/// (~1%-10%) that matters for differencing decisions. Values outside the table
+/// are clamped to `[0, 1]`.
+fn dickey_fuller_pvalue(tau: f64) -> f64 {
+    // (tau quantile, cumulative probability) pairs, ascending in tau.
+    // Left tail => small p (reject unit root / stationary).
+    const TABLE: [(f64, f64); 8] = [
+        (-3.43, 0.01),
+        (-3.12, 0.025),
+        (-2.86, 0.05),
+        (-2.57, 0.10),
+        (-0.44, 0.90),
+        (-0.07, 0.95),
+        (0.23, 0.975),
+        (0.60, 0.99),
+    ];
+
+    if tau <= TABLE[0].0 {
+        return 0.01;
+    }
+    let last = TABLE[TABLE.len() - 1];
+    if tau >= last.0 {
+        return 0.99;
+    }
+
+    for w in TABLE.windows(2) {
+        let (t0, p0) = w[0];
+        let (t1, p1) = w[1];
+        if tau >= t0 && tau <= t1 {
+            let frac = (tau - t0) / (t1 - t0);
+            return (p0 + frac * (p1 - p0)).clamp(0.0, 1.0);
+        }
+    }
+
+    // Unreachable given the bounds checks above, but stay safe.
+    1.0
 }
 
 /// Automatically determines required non-seasonal differencing d
@@ -159,7 +193,15 @@ pub fn estimate_d(series: &Array1<f64>, max_d: usize, alpha: f64) -> usize {
     d
 }
 
-/// Estimates required seasonal differencing D using OCSB / Canova-Hansen surrogate test
+/// Estimates the required seasonal differencing order `D` using a seasonal-strength
+/// heuristic (not a formal OCSB / Canova-Hansen unit-root test).
+///
+/// At each step it seasonally differences the series and measures how much variance
+/// that removes: `F_s = max(0, 1 - Var(seasonally differenced) / Var(current))`. If
+/// `F_s` exceeds a fixed threshold (0.64) the seasonal component is deemed strong
+/// enough to warrant another seasonal difference. This mirrors the strength-based
+/// rule popularised by Wang, Smith & Hyndman and is cheaper than a full unit-root
+/// test, at the cost of some statistical rigor.
 pub fn estimate_D(series: &Array1<f64>, m: usize, max_D: usize) -> usize {
     if m <= 1 || series.len() < 2 * m {
         return 0;

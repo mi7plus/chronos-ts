@@ -1,9 +1,9 @@
+use crate::decomposition::ProphetDecomposition;
 use crate::errors::{ChronosError, Result};
-use ndarray::Array1;
 use chrono::NaiveDate;
+use ndarray::Array1;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use crate::decomposition::ProphetDecomposition;
 
 pub struct LjungBoxResult {
     pub q_stat: f64,
@@ -135,7 +135,9 @@ impl ResidualDiagnostics {
         let m4 = residuals.iter().map(|&x| (x - mean).powi(4)).sum::<f64>() / n;
 
         if m2 == 0.0 {
-            return Err(ChronosError::InvalidParameters("Zero residual variance".into()));
+            return Err(ChronosError::InvalidParameters(
+                "Zero residual variance".into(),
+            ));
         }
 
         let skewness = m3 / m2.powf(1.5);
@@ -239,7 +241,11 @@ pub struct CrossValidationEvaluator {
 
 impl CrossValidationEvaluator {
     pub fn new(horizon: usize, initial: usize, step: usize) -> Self {
-        Self { horizon, initial, step }
+        Self {
+            horizon,
+            initial,
+            step,
+        }
     }
 
     /// Computes horizon-level degradation metrics across rolling cross-validation folds

@@ -1,8 +1,8 @@
+use crate::errors::{ChronosError, Result};
+use crate::statespace::{KalmanFilter, StateSpaceModel};
 use argmin::core::{CostFunction, Executor, Gradient, State};
 use argmin::solver::linesearch::MoreThuenteLineSearch;
 use argmin::solver::quasinewton::LBFGS;
-use crate::errors::{ChronosError, Result};
-use crate::statespace::{KalmanFilter, StateSpaceModel};
 use ndarray::Array1;
 
 pub struct StateSpaceLikelihoodCost<'a, F>
@@ -58,7 +58,10 @@ where
     type Param = Vec<f64>;
     type Gradient = Vec<f64>;
 
-    fn gradient(&self, param: &Self::Param) -> std::result::Result<Self::Gradient, argmin::core::Error> {
+    fn gradient(
+        &self,
+        param: &Self::Param,
+    ) -> std::result::Result<Self::Gradient, argmin::core::Error> {
         let h = 1e-5;
         let mut grad = vec![0.0; param.len()];
         let mut param_plus = param.clone();
@@ -117,10 +120,7 @@ where
                 .get_best_param()
                 .ok_or_else(|| ChronosError::OptimizationError("No parameters returned".into()))?;
 
-            let fitted_params = best_log_params
-                .iter()
-                .map(|&p| p.exp())
-                .collect::<Vec<_>>();
+            let fitted_params = best_log_params.iter().map(|&p| p.exp()).collect::<Vec<_>>();
 
             let optimized_model = model_builder(&fitted_params);
             let max_log_likelihood = -exec_state.state.get_best_cost();

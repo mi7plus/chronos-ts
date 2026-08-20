@@ -34,7 +34,9 @@ fn test_prophet_fit_and_predict_future() {
     model.add_seasonality("weekly", 7.0, 3);
 
     // 3. Fit model on 80 training days
-    model.fit(train_dates, &train_y, None, None).expect("Model fit failed");
+    model
+        .fit(train_dates, &train_y, None, None)
+        .expect("Model fit failed");
 
     // 4. Predict 20 out-of-sample future days
     let prediction = model.predict(test_dates).expect("Prediction failed");
@@ -68,13 +70,17 @@ fn test_prophet_fit_and_predict_future() {
 fn test_multiplicative_prediction_math() {
     let start_date = NaiveDate::from_ymd_opt(2023, 1, 1).unwrap();
     let dates: Vec<NaiveDate> = (0..10).map(|i| start_date + Duration::days(i)).collect();
-    let train_y = Array1::from_vec(vec![10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0]);
+    let train_y = Array1::from_vec(vec![
+        10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0,
+    ]);
 
     let mut model = ProphetDecomposition::new(2, 0.05);
     model.seasonality_mode = SeasonalityMode::Multiplicative;
     model.add_seasonality("weekly", 7.0, 2);
 
-    model.fit(&dates, &train_y, None, None).expect("Model fit failed");
+    model
+        .fit(&dates, &train_y, None, None)
+        .expect("Model fit failed");
     let pred = model.predict(&dates).expect("Prediction failed");
 
     // Check row-by-row that yhat == trend * (1.0 + seasonal + holidays)
@@ -84,7 +90,9 @@ fn test_multiplicative_prediction_math() {
         assert!(
             diff < 1e-6,
             "Multiplicative math failed at index {}: expected {}, got {}",
-            i, expected_yhat, pred.yhat[i]
+            i,
+            expected_yhat,
+            pred.yhat[i]
         );
     }
 }
@@ -119,8 +127,12 @@ fn test_multiplicative_fit_accuracy() {
     mult_model.seasonality_mode = SeasonalityMode::Multiplicative;
     mult_model.add_seasonality("weekly", 7.0, 3);
 
-    mult_model.fit(train_dates, &train_y, None, None).expect("Multiplicative fit failed");
-    let mult_pred = mult_model.predict(test_dates).expect("Multiplicative predict failed");
+    mult_model
+        .fit(train_dates, &train_y, None, None)
+        .expect("Multiplicative fit failed");
+    let mult_pred = mult_model
+        .predict(test_dates)
+        .expect("Multiplicative predict failed");
 
     let errors = &mult_pred.yhat - &actual_future_y;
     let mult_mae = errors.mapv(|e| e.abs()).mean().unwrap();
@@ -141,13 +153,17 @@ fn test_logistic_growth_trend() {
 
     let cap = Array1::from_elem(50, 100.0);
     let y = Array1::from_vec(
-        (0..50).map(|i| 100.0 / (1.0 + (-0.1 * (i as f64 - 25.0)).exp())).collect()
+        (0..50)
+            .map(|i| 100.0 / (1.0 + (-0.1 * (i as f64 - 25.0)).exp()))
+            .collect(),
     );
 
     let mut model = ProphetDecomposition::new(3, 0.05);
     model.trend_type = TrendType::Logistic;
 
-    model.fit(&dates, &y, Some(&cap), None).expect("Logistic fit failed");
+    model
+        .fit(&dates, &y, Some(&cap), None)
+        .expect("Logistic fit failed");
     let pred = model.predict(&dates).expect("Logistic predict failed");
 
     for &y_hat in pred.yhat.iter() {
@@ -179,7 +195,11 @@ fn test_holiday_prior_scale_regularization() {
 
     // Verify holiday component is strongly regularized
     for &h_effect in pred.holidays.iter() {
-        assert!(h_effect.abs() < 1e-3, "Holiday effect was not regularized properly: {}", h_effect);
+        assert!(
+            h_effect.abs() < 1e-3,
+            "Holiday effect was not regularized properly: {}",
+            h_effect
+        );
     }
 }
 
@@ -209,7 +229,11 @@ fn test_model_serialization_roundtrip() {
         .mapv(|e| e.abs())
         .sum();
 
-    assert!(diff < 1e-12, "Deserialized model predictions deviated: {}", diff);
+    assert!(
+        diff < 1e-12,
+        "Deserialized model predictions deviated: {}",
+        diff
+    );
 }
 
 #[test]

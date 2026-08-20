@@ -15,7 +15,7 @@ pub enum ChronosError {
     ConvergenceFailure(String),
 
     #[error("Linear algebra error: {0}")]
-    LinalgError(#[from] ndarray_linalg::error::LinalgError),
+    LinalgError(String),
 
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),

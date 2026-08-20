@@ -1,6 +1,6 @@
 use crate::errors::{ChronosError, Result};
+use crate::linalg;
 use ndarray::{Array1, Array2, Axis};
-use ndarray_linalg::Inverse;
 use serde::{Deserialize, Serialize};
 
 /// State-space specification:
@@ -11,28 +11,28 @@ pub struct StateSpaceModel {
     #[serde(with = "crate::utils::serde_array2")]
     pub transition_matrix: Array2<f64>, // T (m x m)
     #[serde(with = "crate::utils::serde_array2")]
-    pub selection_matrix: Array2<f64>,  // R (m x r)
+    pub selection_matrix: Array2<f64>, // R (m x r)
     #[serde(with = "crate::utils::serde_array1")]
-    pub design_matrix: Array1<f64>,     // Z (m)
+    pub design_matrix: Array1<f64>, // Z (m)
     #[serde(with = "crate::utils::serde_array2")]
-    pub state_cov: Array2<f64>,         // Q (r x r)
-    pub obs_cov: f64,                   // H (scalar)
+    pub state_cov: Array2<f64>, // Q (r x r)
+    pub obs_cov: f64, // H (scalar)
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct FilterStepResult {
     #[serde(with = "crate::utils::serde_array1")]
-    pub a_prior: Array1<f64>,  // a_{t|t-1}
+    pub a_prior: Array1<f64>, // a_{t|t-1}
     #[serde(with = "crate::utils::serde_array2")]
-    pub p_prior: Array2<f64>,  // P_{t|t-1}
+    pub p_prior: Array2<f64>, // P_{t|t-1}
     #[serde(with = "crate::utils::serde_array1")]
-    pub a_post: Array1<f64>,   // a_{t|t}
+    pub a_post: Array1<f64>, // a_{t|t}
     #[serde(with = "crate::utils::serde_array2")]
-    pub p_post: Array2<f64>,   // P_{t|t}
-    pub v: f64,                // Innovation v_t
-    pub f: f64,                // Innovation variance F_t
+    pub p_post: Array2<f64>, // P_{t|t}
+    pub v: f64, // Innovation v_t
+    pub f: f64, // Innovation variance F_t
     #[serde(with = "crate::utils::serde_array1")]
-    pub k: Array1<f64>,        // Kalman gain K_t
+    pub k: Array1<f64>, // Kalman gain K_t
 }
 
 pub struct KalmanFilterResult {
@@ -63,10 +63,7 @@ impl StateSpaceModel {
         let selection_matrix = Array2::eye(2);
 
         // State covariance matrix (Q)
-        let state_cov = array![
-            [sigma_level.powi(2), 0.0],
-            [0.0, sigma_trend.powi(2)]
-        ];
+        let state_cov = array![[sigma_level.powi(2), 0.0], [0.0, sigma_trend.powi(2)]];
 
         // Observation covariance variance scalar (sigma^2_obs)
         let obs_cov = sigma_obs.powi(2);
@@ -199,7 +196,7 @@ impl<'a> KalmanFilter<'a> {
             let p_next_pred = &step_next.p_prior;
 
             // Smoother Gain C_t = P_{t|t} * T^T * [P_{t+1|t}]^-1
-            let p_next_inv = p_next_pred.inv()?;
+            let p_next_inv = linalg::inv(p_next_pred).map_err(ChronosError::LinalgError)?;
             let c_t = step_curr.p_post.dot(&t.t()).dot(&p_next_inv);
 
             // Smoothed State: a_{t|N} = a_{t|t} + C_t * (a_{t+1|N} - a_{t+1|t})
